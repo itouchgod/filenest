@@ -1,18 +1,28 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { downloadArtifact } from "@electron/get";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const electronApp = path.join(
-  rootDir,
-  "node_modules",
-  "electron",
-  "dist",
-  "Electron.app"
-);
+const execFileAsync = promisify(execFile);
+const arch =
+  process.argv
+    .find((arg) => arg.startsWith("--arch="))
+    ?.replace("--arch=", "") || process.arch;
+const validArchs = new Set(["arm64", "x64"]);
+
+if (!validArchs.has(arch)) {
+  throw new Error(`Unsupported macOS arch: ${arch}`);
+}
+
 const releaseDir = path.join(rootDir, "release");
 const appName = "FileNest";
-const appDir = path.join(releaseDir, `${appName}.app`);
+const appDir =
+  arch === process.arch
+    ? path.join(releaseDir, `${appName}.app`)
+    : path.join(releaseDir, `mac-${arch}`, `${appName}.app`);
 const resourcesDir = path.join(appDir, "Contents", "Resources");
 const packagedAppDir = path.join(resourcesDir, "app");
 const macOsDir = path.join(appDir, "Contents", "MacOS");
@@ -20,7 +30,49 @@ const sourceExecutable = path.join(macOsDir, "Electron");
 const targetExecutable = path.join(macOsDir, appName);
 const plistPath = path.join(appDir, "Contents", "Info.plist");
 
-async function copyIntoApp(source, destination) {
+async function getLocalElectronVersion() {
+  const packageJson = await fs.readFile(
+    path.join(rootDir, "node_modules", "electron", "package.json"),
+    "utf8"
+  );
+  return JSON.parse(packageJson).version;
+}
+
+async function getElectronApp() {
+  if (arch === process.arch) {
+    return path.join(
+      rootDir,
+      "node_modules",
+      "electron",
+      "dist",
+      "Electron.app"
+    );
+  }
+
+  const version = await getLocalElectronVersion();
+  const cacheDir = path.join(releaseDir, ".electron-cache", `${version}-${arch}`);
+  const appPath = path.join(cacheDir, "Electron.app");
+
+  try {
+    await fs.access(appPath);
+    return appPath;
+  } catch {
+    await fs.rm(cacheDir, { recursive: true, force: true });
+    await fs.mkdir(cacheDir, { recursive: true });
+  }
+
+  const zipPath = await downloadArtifact({
+    version,
+    platform: "darwin",
+    arch,
+    artifactName: "electron"
+  });
+
+  await execFileAsync("ditto", ["-x", "-k", zipPath, cacheDir]);
+  return appPath;
+}
+
+async function copyIntoApp(source) {
   await fs.cp(path.join(rootDir, source), path.join(packagedAppDir, source), {
     recursive: true
   });
@@ -51,8 +103,11 @@ async function updateInfoPlist() {
   await fs.writeFile(plistPath, plist, "utf8");
 }
 
+const electronApp = await getElectronApp();
+
 await fs.rm(appDir, { recursive: true, force: true });
 await fs.mkdir(releaseDir, { recursive: true });
+await fs.mkdir(path.dirname(appDir), { recursive: true });
 await fs.cp(electronApp, appDir, { recursive: true, verbatimSymlinks: true });
 
 await fs.rm(packagedAppDir, { recursive: true, force: true });
