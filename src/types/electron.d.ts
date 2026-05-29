@@ -11,7 +11,7 @@ export type FileNestApi = {
 
 declare global {
   interface Window {
-    fileNest: FileNestApi;
+    fileNest?: FileNestApi;
   }
 }
 

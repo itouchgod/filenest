@@ -5,6 +5,7 @@ import {
   deleteFolder,
   filterFolders,
   getAllTags,
+  getDroppedPath,
   getFolders,
   openFolder,
   updateFolder
@@ -56,7 +57,7 @@ export default function App() {
 
   async function handleDroppedFiles(files: FileList) {
     const paths = Array.from(files)
-      .map((file) => window.fileNest.getPathForFile(file))
+      .map((file) => getDroppedPath(file))
       .filter(Boolean);
 
     if (paths.length === 0) return;
