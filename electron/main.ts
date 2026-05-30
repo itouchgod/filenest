@@ -15,8 +15,10 @@ import {
 } from "../src/utils/persistedFolder";
 
 let mainWindow: BrowserWindow | null = null;
-let panelWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let trayMenu: Menu | null = null;
+
+const TRAY_MENU_LIMIT = 20;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -92,6 +94,7 @@ async function writeFolders(folders: FolderItem[]) {
     JSON.stringify(persisted, null, 2),
     "utf-8"
   );
+  await refreshTrayMenu();
 }
 
 async function assertDirectory(folderPath: string) {
@@ -133,29 +136,19 @@ function normalizeOptions(
   };
 }
 
-function getWindowUrl(panelMode = false) {
-  const suffix = panelMode ? "?mode=panel" : "";
-
+function getWindowUrl() {
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
-    return `${process.env.VITE_DEV_SERVER_URL}${suffix}`;
+    return process.env.VITE_DEV_SERVER_URL;
   }
 
-  const indexPath = path.join(__dirname, "../../dist/index.html");
-  return panelMode ? `${indexPath}${suffix}` : indexPath;
+  return path.join(__dirname, "../../dist/index.html");
 }
 
-function loadWindowContents(window: BrowserWindow, panelMode = false) {
-  const target = getWindowUrl(panelMode);
+function loadWindowContents(window: BrowserWindow) {
+  const target = getWindowUrl();
 
   if (target.startsWith("http")) {
     void window.loadURL(target);
-    return;
-  }
-
-  if (panelMode) {
-    void window.loadFile(target.split("?")[0], {
-      search: "mode=panel"
-    });
     return;
   }
 
@@ -208,26 +201,17 @@ function createMainWindow(): BrowserWindow {
   return mainWindow;
 }
 
-function createPanelWindow(): BrowserWindow {
-  panelWindow = new BrowserWindow({
-    width: 360,
-    height: 480,
-    show: false,
-    frame: false,
-    resizable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    title: "FileNest",
-    backgroundColor: "#f5f5f7",
-    webPreferences: getSharedWebPreferences()
-  });
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = null;
+    const window = createMainWindow();
+    window.show();
+    window.focus();
+    return;
+  }
 
-  attachWindowCleanup(panelWindow, () => {
-    panelWindow = null;
-  });
-
-  loadWindowContents(panelWindow, true);
-  return panelWindow;
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 function toggleMainWindow() {
@@ -248,35 +232,107 @@ function toggleMainWindow() {
   mainWindow.focus();
 }
 
-function positionPanelWindow() {
-  if (!panelWindow || panelWindow.isDestroyed() || !tray) return;
+type TrayFolder = FolderItem & { missing: boolean };
 
-  const trayBounds = tray.getBounds();
-  const windowBounds = panelWindow.getBounds();
-  const x = Math.round(
-    trayBounds.x + trayBounds.width / 2 - windowBounds.width / 2
-  );
-  const y = Math.round(trayBounds.y + trayBounds.height + 4);
-
-  panelWindow.setPosition(x, y, false);
+function sortTrayFolders(folders: TrayFolder[]) {
+  return [...folders].sort((a, b) => {
+    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
 }
 
-function togglePanelWindow() {
-  if (!panelWindow || panelWindow.isDestroyed()) {
-    panelWindow = null;
-    createPanelWindow();
+function buildTrayMenu(folders: TrayFolder[]): Menu {
+  const sorted = sortTrayFolders(folders);
+  const visible = sorted.slice(0, TRAY_MENU_LIMIT);
+  const overflow = sorted.length - visible.length;
+  const template: Electron.MenuItemConstructorOptions[] = [];
+
+  if (sorted.length === 0) {
+    template.push({ label: "No folders yet", enabled: false });
+  } else {
+    for (const folder of visible) {
+      template.push({
+        label: `${folder.favorite ? "★ " : ""}${folder.name}${folder.missing ? " (missing)" : ""}`,
+        enabled: !folder.missing,
+        click: () => {
+          void openFolderFromTray(folder);
+        }
+      });
+    }
+
+    if (overflow > 0) {
+      template.push({
+        label: `… and ${overflow} more in FileNest`,
+        enabled: false
+      });
+    }
   }
 
-  if (!panelWindow || panelWindow.isDestroyed()) return;
+  template.push(
+    { type: "separator" },
+    {
+      label: "Open FileNest…",
+      click: () => showMainWindow()
+    },
+    { type: "separator" },
+    {
+      label: "Quit FileNest",
+      click: () => app.quit()
+    }
+  );
 
-  if (panelWindow.isVisible()) {
-    panelWindow.hide();
-    return;
+  return Menu.buildFromTemplate(template);
+}
+
+async function openFolderFromTray(folder: TrayFolder) {
+  if (folder.missing) return;
+
+  try {
+    const errorMessage = await shell.openPath(folder.path);
+    if (errorMessage) {
+      throw new Error(errorMessage);
+    }
+
+    const folders = await readFolders();
+    const index = folders.findIndex((item) => item.id === folder.id);
+    if (index === -1) return;
+
+    const existing = folders[index];
+    const openedFolder = toPersistedFolder(
+      {
+        ...existing,
+        openCount: existing.openCount + 1,
+        lastOpenedAt: new Date().toISOString()
+      },
+      existing
+    );
+
+    const nextFolders = [...folders];
+    nextFolders[index] = openedFolder;
+    await writeFolders(nextFolders);
+  } catch (error) {
+    console.error("Failed to open folder from tray menu:", error);
   }
+}
 
-  positionPanelWindow();
-  panelWindow.show();
-  panelWindow.focus();
+async function refreshTrayMenu() {
+  if (!tray) return;
+
+  const folders = await readFolders();
+  const foldersWithStatus = await Promise.all(
+    folders.map(async (folder) => ({
+      ...folder,
+      missing: await isFolderMissing(folder.path)
+    }))
+  );
+
+  trayMenu = buildTrayMenu(foldersWithStatus);
+  tray.setContextMenu(trayMenu);
+
+  const count = folders.length;
+  tray.setToolTip(
+    count === 0 ? "FileNest" : `FileNest — ${count} folder${count === 1 ? "" : "s"}`
+  );
 }
 
 function createTray() {
@@ -289,27 +345,20 @@ function createTray() {
     );
   }
 
-  tray = new Tray(trayIcon.resize({ width: 16, height: 16 }));
+  trayIcon = trayIcon.resize({ width: 16, height: 16 });
+  if (process.platform === "darwin") {
+    trayIcon.setTemplateImage(true);
+  }
+
+  tray = new Tray(trayIcon);
   tray.setToolTip("FileNest");
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: "Open FileNest",
-      click: () => toggleMainWindow()
-    },
-    {
-      label: "Show Panel",
-      click: () => togglePanelWindow()
-    },
-    { type: "separator" },
-    {
-      label: "Quit",
-      click: () => app.quit()
-    }
-  ]);
+  tray.on("click", () => {
+    if (!tray || !trayMenu) return;
+    tray.popUpContextMenu(trayMenu);
+  });
 
-  tray.setContextMenu(contextMenu);
-  tray.on("click", () => togglePanelWindow());
+  void refreshTrayMenu();
 }
 
 function registerGlobalShortcut() {

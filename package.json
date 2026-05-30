@@ -45,6 +45,7 @@
     "vite": "^6.0.7"
   },
   "devDependencies": {
+    "@electron/get": "^5.0.0",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",

@@ -46,18 +46,11 @@ function readStoredLayout(): DisplayLayout {
   return "grid";
 }
 
-function isPanelMode() {
-  return new URLSearchParams(window.location.search).get("mode") === "panel";
-}
-
 export default function App() {
-  const panelMode = isPanelMode();
   const [folders, setFolders] = useState<FolderItemWithStatus[]>([]);
   const [filter, setFilter] = useState<FolderFilter>(initialFilter);
   const [searchTerm, setSearchTerm] = useState("");
-  const [layout, setLayout] = useState<DisplayLayout>(() =>
-    panelMode ? "compact" : readStoredLayout()
-  );
+  const [layout, setLayout] = useState<DisplayLayout>(() => readStoredLayout());
   const [notice, setNotice] = useState<Notice | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -77,10 +70,8 @@ export default function App() {
   }, [notice]);
 
   useEffect(() => {
-    if (!panelMode) {
-      window.localStorage.setItem(layoutStorageKey, layout);
-    }
-  }, [layout, panelMode]);
+    window.localStorage.setItem(layoutStorageKey, layout);
+  }, [layout]);
 
   async function refreshFolders() {
     try {
@@ -229,7 +220,7 @@ export default function App() {
 
   return (
     <div
-      className={`app-shell ${panelMode ? "panel-mode" : ""} ${isDragging ? "is-dragging" : ""}`}
+      className={`app-shell ${isDragging ? "is-dragging" : ""}`}
       onDragOver={(event) => {
         event.preventDefault();
         setIsDragging(true);
@@ -243,16 +234,14 @@ export default function App() {
         void handleDroppedFiles(event.dataTransfer.files);
       }}
     >
-      {!panelMode ? (
-        <Sidebar
-          filter={filter}
-          folders={folders}
-          tags={tags}
-          onExport={handleExport}
-          onFilterChange={setFilter}
-          onImport={handleImport}
-        />
-      ) : null}
+      <Sidebar
+        filter={filter}
+        folders={folders}
+        tags={tags}
+        onExport={handleExport}
+        onFilterChange={setFilter}
+        onImport={handleImport}
+      />
 
       <main className="content">
         <header className="top-bar">
@@ -262,9 +251,7 @@ export default function App() {
           </div>
           <div className="top-bar-actions">
             <SearchBar value={searchTerm} onChange={setSearchTerm} />
-            {!panelMode ? (
-              <LayoutSwitcher value={layout} onChange={setLayout} />
-            ) : null}
+            <LayoutSwitcher value={layout} onChange={setLayout} />
           </div>
         </header>
 

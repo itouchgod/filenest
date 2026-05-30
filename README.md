@@ -11,7 +11,7 @@ FileNest 是一款 macOS 桌面工具，用于保存、标签分类、搜索、�
 - 导入 / 导出 JSON 备份
 - 路径失效检测与提示
 - 删除前确认
-- 菜单栏 Tray 小面板
+- 菜单栏 Tray：**点击图标 → 文件夹下拉列表**，底部 **Open FileNest…** 打开主窗口
 - 全局快捷键 `Cmd+Shift+F` 显示/隐藏主窗口
 
 > 说明：FileNest **不支持 note（备注）** 功能，分类以标签为主。
@@ -64,6 +64,12 @@ React UI  →  folderStore.ts  →  preload.ts  →  main.ts  →  folders.json
 - 导出为 JSON 文件
 - 导入时按路径去重；无效路径会被跳过
 
+## 菜单栏
+
+- 点击顶部菜单栏 **FileNest 图标** → 弹出文件夹列表，点击即可在 Finder 打开
+- 列表底部 **Open FileNest…** → 打开完整主窗口（管理标签、布局、导入导出）
+- 右键菜单与左键相同
+
 ## 快捷键
 
 | 快捷键 | 作用 |
@@ -72,7 +78,6 @@ React UI  →  folderStore.ts  →  preload.ts  →  main.ts  →  folders.json
 
 ## 已知限制
 
-- 菜单栏模式与 Dock 主窗口目前同时可用
 - Web 预览模式（Vercel）不支持真实打开 Finder 文件夹
 - 未设置签名证书时，DMG 仅适合本地测试
 
