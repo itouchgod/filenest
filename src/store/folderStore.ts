@@ -1,4 +1,16 @@
-import type { FolderFilter, FolderItem } from "../types/folder";
+import type {
+  FolderFilter,
+  FolderItem,
+  FolderItemWithStatus,
+  FolderSetupOptions,
+  ImportResult
+} from "../types/folder";
+import {
+  dedupeTags,
+  resolveImportId,
+  stripRuntimeFields,
+  toPersistedFolder
+} from "../utils/persistedFolder";
 
 const webStorageKey = "filenest.webPreview.folders";
 
@@ -10,14 +22,22 @@ function readWebFolders(): FolderItem[] {
   try {
     const raw = window.localStorage.getItem(webStorageKey);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter(
+        (item): item is Partial<FolderItem> & { path: string } =>
+          Boolean(item && typeof item === "object" && typeof item.path === "string")
+      )
+      .map((item) => toPersistedFolder(item));
   } catch {
     return [];
   }
 }
 
 function writeWebFolders(folders: FolderItem[]) {
-  window.localStorage.setItem(webStorageKey, JSON.stringify(folders));
+  const persisted = folders.map((folder) => toPersistedFolder(folder));
+  window.localStorage.setItem(webStorageKey, JSON.stringify(persisted));
 }
 
 function getFolderName(folderPath: string) {
@@ -25,19 +45,36 @@ function getFolderName(folderPath: string) {
   return parts.at(-1) ?? folderPath;
 }
 
-function dedupeTags(tags: string[]) {
-  return Array.from(new Set(tags.map((tag) => tag.trim())))
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b));
+function normalizeOptions(options?: FolderSetupOptions) {
+  return {
+    tags: dedupeTags(options?.tags ?? []),
+    favorite: options?.favorite ?? false,
+    name: options?.name?.trim() || undefined
+  };
 }
 
-export async function getFolders() {
+function withWebMissingStatus(folders: FolderItem[]): FolderItemWithStatus[] {
+  return folders.map((folder) => ({ ...folder, missing: false }));
+}
+
+export async function getFolders(): Promise<FolderItemWithStatus[]> {
   if (isNativeApp()) return window.fileNest!.getFolders();
-  return readWebFolders();
+  return withWebMissingStatus(readWebFolders());
 }
 
 export async function addFolder(path: string) {
-  if (isNativeApp()) return window.fileNest!.addFolder(path);
+  return addFolderWithOptions(path);
+}
+
+export async function addFolderWithOptions(
+  path: string,
+  options?: FolderSetupOptions
+) {
+  const normalized = normalizeOptions(options);
+
+  if (isNativeApp()) {
+    return window.fileNest!.addFolderWithOptions(path, normalized);
+  }
 
   const folders = readWebFolders();
   if (folders.some((folder) => folder.path === path)) {
@@ -45,28 +82,36 @@ export async function addFolder(path: string) {
   }
 
   const now = new Date().toISOString();
-  const folder: FolderItem = {
+  const folder = toPersistedFolder({
     id: crypto.randomUUID(),
-    name: getFolderName(path),
+    name: normalized.name ?? getFolderName(path),
     path,
-    tags: [],
-    favorite: false,
+    tags: normalized.tags,
+    favorite: normalized.favorite,
     openCount: 0,
     createdAt: now
-  };
+  });
 
   writeWebFolders([folder, ...folders]);
   return folder;
 }
 
-export async function updateFolder(folder: FolderItem) {
-  if (isNativeApp()) return window.fileNest!.updateFolder(folder);
-
-  const nextFolder = { ...folder, tags: dedupeTags(folder.tags) };
-  const folders = readWebFolders().map((item) =>
-    item.id === nextFolder.id ? nextFolder : item
+export async function updateFolder(folder: FolderItem | FolderItemWithStatus) {
+  const persisted = stripRuntimeFields(
+    "missing" in folder ? folder : { ...folder, missing: false }
   );
-  writeWebFolders(folders);
+
+  if (isNativeApp()) return window.fileNest!.updateFolder(persisted);
+
+  const folders = readWebFolders();
+  const existing = folders.find((item) => item.id === persisted.id);
+  const nextFolder = existing
+    ? toPersistedFolder(persisted, existing)
+    : toPersistedFolder(persisted);
+
+  writeWebFolders(
+    folders.map((item) => (item.id === nextFolder.id ? nextFolder : item))
+  );
   return nextFolder;
 }
 
@@ -84,17 +129,108 @@ export async function openFolder(path: string) {
   const folder = folders.find((item) => item.path === path);
   if (!folder) return null;
 
-  const openedFolder: FolderItem = {
-    ...folder,
-    openCount: folder.openCount + 1,
-    lastOpenedAt: new Date().toISOString()
-  };
+  const openedFolder = toPersistedFolder(
+    {
+      ...folder,
+      openCount: folder.openCount + 1,
+      lastOpenedAt: new Date().toISOString()
+    },
+    folder
+  );
 
   writeWebFolders(
     folders.map((item) => (item.id === openedFolder.id ? openedFolder : item))
   );
 
   return openedFolder;
+}
+
+export async function exportFoldersToFile(): Promise<string | null> {
+  if (isNativeApp()) return window.fileNest!.exportFoldersToFile();
+
+  const folders = readWebFolders();
+  const blob = new Blob([JSON.stringify(folders, null, 2)], {
+    type: "application/json"
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const date = new Date().toISOString().slice(0, 10);
+  anchor.href = url;
+  anchor.download = `filenest-export-${date}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+  return anchor.download;
+}
+
+export async function importFoldersFromFile(): Promise<ImportResult | null> {
+  if (isNativeApp()) return window.fileNest!.importFoldersFromFile();
+
+  return new Promise((resolve, reject) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/json,.json";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        resolve(null);
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(await file.text());
+        if (!Array.isArray(parsed)) {
+          throw new Error("Invalid import file.");
+        }
+        resolve(await importFolders(parsed as FolderItem[]));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    input.click();
+  });
+}
+
+export async function importFolders(items: FolderItem[]): Promise<ImportResult> {
+  if (isNativeApp()) return window.fileNest!.importFolders(items);
+
+  const folders = readWebFolders();
+  const existingPaths = new Set(folders.map((folder) => folder.path));
+  const reservedIds = new Set(folders.map((folder) => folder.id));
+  let added = 0;
+  let skipped = 0;
+  let invalid = 0;
+  const next = [...folders];
+
+  for (const item of items) {
+    if (!item?.path) {
+      invalid += 1;
+      continue;
+    }
+
+    if (existingPaths.has(item.path)) {
+      skipped += 1;
+      continue;
+    }
+
+    existingPaths.add(item.path);
+    next.unshift(
+      toPersistedFolder(
+        {
+          ...item,
+          id: resolveImportId(item.id, reservedIds),
+          path: item.path,
+          name: item.name?.trim() || getFolderName(item.path)
+        },
+        {
+          createdAt: item.createdAt || new Date().toISOString()
+        }
+      )
+    );
+    added += 1;
+  }
+
+  writeWebFolders(next);
+  return { added, skipped, invalid };
 }
 
 export function getDroppedPath(file: File) {
@@ -109,7 +245,7 @@ export function getAllTags(folders: FolderItem[]) {
 }
 
 export function filterFolders(
-  folders: FolderItem[],
+  folders: FolderItemWithStatus[],
   filter: FolderFilter,
   searchTerm: string
 ) {
@@ -140,4 +276,8 @@ export function filterFolders(
     if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
+}
+
+export function countMissingFolders(folders: FolderItemWithStatus[]) {
+  return folders.filter((folder) => folder.missing).length;
 }

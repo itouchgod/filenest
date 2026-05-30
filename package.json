@@ -12,7 +12,11 @@
     "start": "npm run build && electron .",
     "package:mac": "npm run build && node scripts/package-mac.mjs",
     "package:mac:arm64": "npm run build && node scripts/package-mac.mjs --arch=arm64",
-    "package:mac:x64": "npm run build && node scripts/package-mac.mjs --arch=x64"
+    "package:mac:x64": "npm run build && node scripts/package-mac.mjs --arch=x64",
+    "package:dmg": "npm run package:mac:arm64 && node scripts/create-dmg.mjs --arch=arm64",
+    "package:dmg:arm64": "npm run package:mac:arm64 && node scripts/create-dmg.mjs --arch=arm64",
+    "package:dmg:x64": "npm run package:mac:x64 && node scripts/create-dmg.mjs --arch=x64",
+    "package:release": "node scripts/package-release.mjs"
   },
   "build": {
     "appId": "com.itouchgod.filenest",

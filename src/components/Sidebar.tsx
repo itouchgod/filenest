@@ -1,11 +1,13 @@
-import { Clock3, Folder, Star } from "lucide-react";
+import { Clock3, Download, Folder, Star, Upload } from "lucide-react";
 import type { FolderFilter, FolderItem, FolderView } from "../types/folder";
 
 type SidebarProps = {
   filter: FolderFilter;
   folders: FolderItem[];
   tags: string[];
+  onExport: () => void;
   onFilterChange: (filter: FolderFilter) => void;
+  onImport: () => void;
 };
 
 const navItems: Array<{
@@ -22,7 +24,9 @@ export default function Sidebar({
   filter,
   folders,
   tags,
-  onFilterChange
+  onExport,
+  onFilterChange,
+  onImport
 }: SidebarProps) {
   const favoriteCount = folders.filter((folder) => folder.favorite).length;
 
@@ -75,6 +79,17 @@ export default function Sidebar({
           <div className="sidebar-empty">No tags yet</div>
         )}
       </section>
+
+      <div className="sidebar-footer">
+        <button className="sidebar-action" type="button" onClick={onImport}>
+          <Upload size={16} />
+          <span>Import…</span>
+        </button>
+        <button className="sidebar-action" type="button" onClick={onExport}>
+          <Download size={16} />
+          <span>Export…</span>
+        </button>
+      </div>
     </aside>
   );
 }

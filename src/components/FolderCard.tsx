@@ -1,34 +1,23 @@
-import { FolderOpen, Star, Trash2 } from "lucide-react";
-import type { FolderItem } from "../types/folder";
-import TagEditor from "./TagEditor";
+import { FolderOpen, Pencil, Star, Trash2 } from "lucide-react";
+import type { FolderItemWithStatus } from "../types/folder";
+import { formatLastOpened } from "../utils/folderDisplay";
 
 type FolderCardProps = {
-  folder: FolderItem;
-  onDelete: (id: string) => void;
-  onOpen: (folder: FolderItem) => void;
-  onUpdate: (folder: FolderItem) => void;
+  folder: FolderItemWithStatus;
+  onEdit: (folder: FolderItemWithStatus) => void;
+  onOpen: (folder: FolderItemWithStatus) => void;
+  onRequestDelete: (id: string) => void;
 };
-
-function formatLastOpened(value?: string) {
-  if (!value) return "Never opened";
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
-}
 
 export default function FolderCard({
   folder,
-  onDelete,
+  onEdit,
   onOpen,
-  onUpdate
+  onRequestDelete
 }: FolderCardProps) {
   return (
     <article
-      className="folder-card"
+      className={`folder-card ${folder.missing ? "folder-missing" : ""}`}
       role="button"
       tabIndex={0}
       onClick={() => onOpen(folder)}
@@ -44,16 +33,24 @@ export default function FolderCard({
           <FolderOpen size={24} />
         </div>
         <div className="folder-actions">
+          {folder.missing ? (
+            <span className="missing-badge">Missing</span>
+          ) : null}
+          {folder.favorite ? (
+            <span className="icon-button favorite" title="Favorite">
+              <Star size={17} fill="currentColor" />
+            </span>
+          ) : null}
           <button
-            className={`icon-button ${folder.favorite ? "favorite" : ""}`}
+            className="icon-button"
             type="button"
-            title={folder.favorite ? "Remove favorite" : "Add favorite"}
+            title="Edit folder"
             onClick={(event) => {
               event.stopPropagation();
-              onUpdate({ ...folder, favorite: !folder.favorite });
+              onEdit(folder);
             }}
           >
-            <Star size={17} fill={folder.favorite ? "currentColor" : "none"} />
+            <Pencil size={16} />
           </button>
           <button
             className="icon-button danger"
@@ -61,7 +58,7 @@ export default function FolderCard({
             title="Delete folder"
             onClick={(event) => {
               event.stopPropagation();
-              onDelete(folder.id);
+              onRequestDelete(folder.id);
             }}
           >
             <Trash2 size={17} />
@@ -74,7 +71,17 @@ export default function FolderCard({
         {folder.path}
       </p>
 
-      <TagEditor folder={folder} onUpdate={onUpdate} />
+      {folder.tags.length > 0 ? (
+        <div className="folder-tags">
+          {folder.tags.map((tag) => (
+            <span className="tag-pill tag-pill-readonly" key={tag}>
+              {tag}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="folder-tags-empty">No tags</p>
+      )}
 
       <div className="folder-meta">
         <span>{folder.openCount} opens</span>

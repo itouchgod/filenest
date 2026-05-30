@@ -1,23 +1,19 @@
 import { Plus, X } from "lucide-react";
 import { KeyboardEvent, useState } from "react";
-import type { FolderItem } from "../types/folder";
 
 type TagEditorProps = {
-  folder: FolderItem;
-  onUpdate: (folder: FolderItem) => void;
+  tags: string[];
+  onChange: (tags: string[]) => void;
 };
 
-export default function TagEditor({ folder, onUpdate }: TagEditorProps) {
+export default function TagEditor({ tags, onChange }: TagEditorProps) {
   const [draftTag, setDraftTag] = useState("");
 
   function addTag() {
     const nextTag = draftTag.trim();
-    if (!nextTag || folder.tags.includes(nextTag)) return;
+    if (!nextTag || tags.includes(nextTag)) return;
 
-    onUpdate({
-      ...folder,
-      tags: [...folder.tags, nextTag]
-    });
+    onChange([...tags, nextTag]);
     setDraftTag("");
   }
 
@@ -29,24 +25,15 @@ export default function TagEditor({ folder, onUpdate }: TagEditorProps) {
   }
 
   return (
-    <div
-      className="tag-editor"
-      onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
-    >
+    <div className="tag-editor">
       <div className="folder-tags">
-        {folder.tags.map((tag) => (
+        {tags.map((tag) => (
           <span className="tag-pill" key={tag}>
             {tag}
             <button
               type="button"
               title={`Remove ${tag}`}
-              onClick={() =>
-                onUpdate({
-                  ...folder,
-                  tags: folder.tags.filter((item) => item !== tag)
-                })
-              }
+              onClick={() => onChange(tags.filter((item) => item !== tag))}
             >
               <X size={12} />
             </button>

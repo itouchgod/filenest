@@ -115,6 +115,7 @@ await fs.mkdir(packagedAppDir, { recursive: true });
 
 await copyIntoApp("dist");
 await copyIntoApp("dist-electron");
+await copyIntoApp("assets");
 
 await fs.writeFile(
   path.join(packagedAppDir, "package.json"),
